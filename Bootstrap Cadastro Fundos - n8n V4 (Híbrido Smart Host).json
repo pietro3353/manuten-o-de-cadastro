@@ -1,0 +1,215 @@
+{
+  "name": "Bootstrap Cadastro Fundos - n8n V4 (Híbrido Smart Host)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-manual-1",
+      "name": "Início Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        112,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    output_path: 'resultado_cvm.json',\n    sql_output_path: '/tmp/update_fundos.sql',\n    anbima_client_id: 'lFzaX80V5YmN',\n    anbima_client_secret: 'y4pPIlkqeg2b',\n    python_concurrency: 100,\n    // Procedures\n    procedures: {\n      razaoSocial: 'CETIP.P_ATUALIZA_RAZAO_SOCIAL',\n      administrador: 'CETIP.P_ATUALIZA_ADMINISTRADOR',\n      gestor: 'CETIP.P_ATUALIZA_GESTOR',\n      escriturador: 'CETIP.P_ATUALIZA_ESCRITURADOR',\n      naturezaEconomica: 'CETIP.P_ATUALIZA_NATUREZA_ECONOMICA',\n      naturezaJuridica: 'CETIP.P_ATUALIZA_NATUREZA_JURIDICA'\n    }\n  }\n}];"
+      },
+      "id": "config-node-1",
+      "name": "Configurações Globais",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $input.first().json;\n\nasync function tryPing(url) {\n  try {\n    await this.helpers.httpRequest({\n      method: 'GET',\n      url: `${url}/status`,\n      timeout: 2000\n    });\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\n// 1. Tenta acessar via localhost (Funciona no Windows Local/Nativo)\nlet worker_url = 'http://127.0.0.1:8000';\nlet isAlive = await tryPing(worker_url);\n\n// 2. Se falhar, tenta host.docker.internal (Funciona quando n8n está no Docker)\nif (!isAlive) {\n  worker_url = 'http://host.docker.internal:8000';\n  isAlive = await tryPing(worker_url);\n}\n\n// 3. Se falhar, tenta o IP da rede local como último recurso\nif (!isAlive) {\n  worker_url = 'http://192.168.15.40:8000';\n  isAlive = await tryPing(worker_url);\n}\n\nif (!isAlive) {\n  throw new Error(`\n    O SERVIDOR PYTHON NÃO ESTÁ RODANDO! \n    Por favor, abra um terminal na pasta do projeto e digite: python main.py --server\n  `);\n}\n\nreturn [{\n  json: {\n    ...cfg,\n    python_worker_url: worker_url,\n    host_detectado: worker_url\n  }\n}];"
+      },
+      "id": "smart-host-1",
+      "name": "Detectar Ambiente Automático",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.python_worker_url}}/start",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"output_path\": \"{{$json.output_path}}\",\n  \"anbima_client_id\": \"{{$json.anbima_client_id}}\",\n  \"anbima_client_secret\": \"{{$json.anbima_client_secret}}\",\n  \"concurrency\": {{$json.python_concurrency}}\n}",
+        "options": {}
+      },
+      "id": "start-python-1",
+      "name": "Iniciar Python",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        784,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $items('Detectar Ambiente Automático')[0].json;\nconst baseUrl = cfg.python_worker_url;\nconst maxAttempts = 720; // 720 * 10s = 2 horas máximo\nconst delayMs = 10000; // 10 segundos entre checagens\n\nfunction delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }\n\nasync function getStatus() {\n  return await this.helpers.httpRequest({\n    method: 'GET',\n    url: `${baseUrl}/status`,\n    json: true\n  });\n}\n\nlet finalStatus = null;\n\nfor (let i = 0; i < maxAttempts; i++) {\n  try {\n    const res = await getStatus.call(this);\n    if (res.status === 'done' || res.status === 'error') {\n      finalStatus = res;\n      break;\n    }\n  } catch (err) {\n    // ignora erro de rede temporário\n  }\n  await delay(delayMs);\n}\n\nif (!finalStatus) throw new Error('Timeout esperando o Python Worker');\nif (finalStatus.status === 'error') throw new Error(`Erro no Python Worker: ${finalStatus.message}`);\n\nreturn [{ json: { status: 'SUCESSO', worker_response: finalStatus } }];"
+      },
+      "id": "poll-python-1",
+      "name": "Aguardar Python (Polling)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$items('Detectar Ambiente Automático')[0].json.python_worker_url}}/download",
+        "options": {}
+      },
+      "id": "read-json-1",
+      "name": "Ler Resultado JSON",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1232,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $items('Detectar Ambiente Automático')[0].json;\nconst payload = $input.first().json;\n\nconst records = payload.records || [];\nconst sqlLines = [];\n\nfunction escSql(s='') { return String(s || '').replace(/'/g, \"''\"); }\n\nfor (const r of records) {\n  const cnpj = r.cnpj_fundo;\n  if (!cnpj) continue;\n  \n  if (cfg.procedures.razaoSocial && r.razao_social_final) {\n    sqlLines.push(`${cfg.procedures.razaoSocial}('${cnpj}','${escSql(r.razao_social_normalizada || r.razao_social_final)}');`);\n  }\n  if (cfg.procedures.administrador && r.administrador_id && r.administrador_nome) {\n    sqlLines.push(`${cfg.procedures.administrador}('${cnpj}','${r.administrador_id}','${escSql(r.administrador_nome)}');`);\n  }\n  if (cfg.procedures.gestor && r.gestor_id && r.gestor_nome) {\n    sqlLines.push(`${cfg.procedures.gestor}('${cnpj}','${r.gestor_id}','${escSql(r.gestor_nome)}');`);\n  }\n  if (cfg.procedures.escriturador && r.escriturador_id && r.escriturador_nome) {\n    sqlLines.push(`${cfg.procedures.escriturador}('${cnpj}','${r.escriturador_id}','${escSql(r.escriturador_nome)}');`);\n  }\n  if (cfg.procedures.naturezaEconomica && r.natureza_economica_final) {\n    sqlLines.push(`${cfg.procedures.naturezaEconomica}('${cnpj}','${escSql(r.natureza_economica_final)}');`);\n  }\n  if (cfg.procedures.naturezaJuridica && r.natureza_juridica_final) {\n    sqlLines.push(`${cfg.procedures.naturezaJuridica}('${cnpj}','${escSql(r.natureza_juridica_final)}');`);\n  }\n}\n\nconst finalSql = sqlLines.join('\\n');\n\nreturn [{\n  json: { \n    status: 'SUCESSO',\n    total_registros: records.length,\n    total_querys: sqlLines.length\n  },\n  binary: {\n    data: {\n      data: Buffer.from(finalSql, 'utf-8').toString('base64'),\n      mimeType: 'application/sql',\n      fileName: cfg.sql_output_path\n    }\n  }\n}];"
+      },
+      "id": "generate-sql-1",
+      "name": "Gerar Consultas SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "fileName": "={{$items('Detectar Ambiente Automático')[0].json.sql_output_path}}",
+        "options": {}
+      },
+      "id": "write-sql-1",
+      "name": "Salvar Arquivo SQL",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        304
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Início Manual": {
+      "main": [
+        [
+          {
+            "node": "Configurações Globais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configurações Globais": {
+      "main": [
+        [
+          {
+            "node": "Detectar Ambiente Automático",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar Ambiente Automático": {
+      "main": [
+        [
+          {
+            "node": "Iniciar Python",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Iniciar Python": {
+      "main": [
+        [
+          {
+            "node": "Aguardar Python (Polling)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar Python (Polling)": {
+      "main": [
+        [
+          {
+            "node": "Ler Resultado JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Resultado JSON": {
+      "main": [
+        [
+          {
+            "node": "Gerar Consultas SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar Consultas SQL": {
+      "main": [
+        [
+          {
+            "node": "Salvar Arquivo SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "2b663620-16c4-4105-a897-6145ae56c208",
+  "meta": {
+    "instanceId": "f09484b65aaddca6a11030b07fd13d81ab7e111f7b2b4395c59211c11ad2e2e8"
+  },
+  "id": "jawIhnJoxJvwZLQD",
+  "tags": []
+}
