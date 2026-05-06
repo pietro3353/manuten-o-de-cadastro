@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  b3-worker:
+    build: 
+      # Define o diretório de build como a raiz (onde o main.py está)
+      context: ..
+      # Aponta para o Dockerfile que está dentro desta pasta
+      dockerfile: docker_env/Dockerfile
+    container_name: b3-fundos-worker
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mapeia a pasta "data" da raiz do seu projeto local para dentro do container
+      - ../data:/app/data
+    
+    # Política de restart de APIs em produção
+    restart: unless-stopped
+    
+    # Configurações para garantir logs legíveis em tempo real no Docker
+    environment:
+      - PYTHONUNBUFFERED=1
