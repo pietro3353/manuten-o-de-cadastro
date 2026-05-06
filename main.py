@@ -43,16 +43,151 @@ def find_col(header: List[str], candidates: List[str]) -> int:
                 return i
     return -1
 
-def map_natureza_economica(tipo_classe: str, class_anbima: str) -> str:
-    tipo = str(tipo_classe or "").upper()
-    anbima = str(class_anbima or "").upper()
+B3_NATUREZAS = [
+    "FUNCINE FUNDO DE FINANCIAMENTO DA INDUSTRIA CINEMATOGRAFICA NACIONAL",
+    "FUNDO DE APOSENTADORIA PROGRAMADA INDIVIDUAL - FAPI",
+    "FUNDO DE CONVERSAO",
+    "FUNDO DE INVESTIMENTO CAMBIAL",
+    "FUNDO DE INVESTIMENTO CAMBIAL DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO CULTURAL E ARTISTICO - FICART",
+    "FUNDO DE INVESTIMENTO DE CURTO PRAZO",
+    "FUNDO DE INVESTIMENTO DO FUNDO DE GARANTIA DO TEMPO DE SERVICO",
+    "FUNDO DE INVESTIMENTO EM ACOES",
+    "FUNDO DE INVESTIMENTO EM COTAS DE FUNDO DE PARTICIPACOES - FICFIP",
+    "FUNDO DE INVESTIMENTO EM DIREITOS CREDITORIOS",
+    "FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA",
+    "FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO EM INDICE DE MERCADO",
+    "FUNDO DE INVESTIMENTO EM PARTICIPACOES",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FIDC - FIQFIDC",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO CAMBIAL",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO CAMBIAL DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE CURTO PRAZO",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE RENDA FIXA",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE RENDA FIXA DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM ACOES",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO MULTIMERCADO",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO MULTIMERCADO DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO REFERENCIADOS",
+    "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO REFERENCIADOS DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO EM RENDA FIXA",
+    "FUNDO DE INVESTIMENTO EM RENDA FIXA DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO IMOBILIARIO",
+    "FUNDO DE INVESTIMENTO MULTIMERCADO",
+    "FUNDO DE INVESTIMENTO MULTIMERCADO DE LONGO PRAZO",
+    "FUNDO DE INVESTIMENTO NAS CADEIAS PRODUTIVAS AGROINDUSTRIAIS",
+    "FUNDO DE INVESTIMENTO PREVIDENCIARIO",
+    "FUNDO DE INVESTIMENTO REFERENCIADO",
+    "FUNDO DE INVESTIMENTO REFERENCIADO DE LONGO PRAZO",
+    "FUNDO DE PRIVATIZACAO - CP",
+    "FUNDO DE PRIVATIZACAO - DIVIDA SECURITIZADA",
+    "FUNDO DE PRIVATIZACAO - FGTS",
+    "FUNDO GARANTIDOR DE OPERACOES",
+    "FUNDO MUTUO DE INVESTIMENTO EM EMPRESAS EMERGENTES"
+]
+
+def map_natureza_economica_b3(tipo_fundo: str, tipo_classe: str, class_anbima: str, nome_fundo: str) -> str:
+    import unicodedata
+    def clean(text):
+        if not text: return ""
+        txt = unicodedata.normalize("NFD", str(text).upper())
+        return "".join(ch for ch in txt if unicodedata.category(ch) != "Mn").strip()
     
-    if "AÇÕES" in tipo or "ACOES" in tipo or "AÇÕES" in anbima or "ACOES" in anbima: return "Ações"
-    if "FII" in tipo or "IMOBILIÁRIO" in tipo or "IMOBILIARIO" in tipo: return "Imobiliário"
-    if "FIDC" in tipo or "CREDITÓRIOS" in tipo or "CREDITORIOS" in tipo: return "Direitos Creditórios"
-    if "MULTIMERCADO" in tipo or "MULTIMERCADOS" in anbima: return "Multimercado"
-    if "RENDA FIXA" in tipo or "RENDA FIXA" in anbima: return "Renda Fixa"
-    if "CAMBIAL" in tipo or "CAMBIAL" in anbima: return "Cambial"
+    tf = clean(tipo_fundo)
+    tc = clean(tipo_classe)
+    ca = clean(class_anbima)
+    nf = clean(nome_fundo)
+
+    for nat in B3_NATUREZAS:
+        nat_clean = clean(nat)
+        if nat_clean == tf or nat_clean == tc:
+            return nat
+
+    tf_words = tf.split()
+    nf_words = nf.split()
+    tc_words = tc.split()
+
+    # Modificadores Globais
+    is_fic = "FIC" in nf_words or "COTAS" in nf or "QUOTAS" in nf or "FICFIDC" in nf or "FIQFIDC" in nf or "FICFIP" in nf
+    is_lp = "LONGO PRAZO" in tc or "LONGO PRAZO" in nf or " LP " in nf or nf.endswith(" LP")
+    is_cp = "CURTO PRAZO" in tc or "CURTO PRAZO" in nf or " CP " in nf or nf.endswith(" CP")
+
+    # ==========================================
+    # PASSO 1: Tipos Macro (Categorias Exclusivas)
+    # ==========================================
+    
+    # Macro FII
+    if "FII" in tf_words or "IMOBILIARIO" in tf or "FII" in nf_words or "IMOBILIARIO" in nf:
+        return "FUNDO DE INVESTIMENTO IMOBILIARIO"
+
+    # Macro FIDC
+    if "FIDC" in tf_words or "DIREITOS CREDITORIOS" in tf or "FIDC" in nf_words or "DIREITOS CREDITORIOS" in nf:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM QUOTAS DE FIDC - FIQFIDC"
+        return "FUNDO DE INVESTIMENTO EM DIREITOS CREDITORIOS"
+
+    # Macro FIP
+    if "FIP" in tf_words or "PARTICIPACOES" in tf or "FIP" in nf_words or "PARTICIPACOES" in nf:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM COTAS DE FUNDO DE PARTICIPACOES - FICFIP"
+        return "FUNDO DE INVESTIMENTO EM PARTICIPACOES"
+
+    # ==========================================
+    # PASSO 2: A Árvore dos FIs (Baseado em tipo_classe e nome_fundo)
+    # ==========================================
+    
+    # Ações
+    if "ACOES" in tc_words or "ACOES" in nf or "ACAO" in nf:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM ACOES"
+        return "FUNDO DE INVESTIMENTO EM ACOES"
+
+    # Multimercado
+    if "MULTIMERCADO" in tc_words or "MULTIMERCADO" in nf:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO MULTIMERCADO DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO MULTIMERCADO"
+        return "FUNDO DE INVESTIMENTO MULTIMERCADO DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO MULTIMERCADO"
+
+    # Renda Fixa
+    if "RENDA FIXA" in tc or "RENDA FIXA" in nf:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE RENDA FIXA DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE RENDA FIXA"
+        return "FUNDO DE INVESTIMENTO EM RENDA FIXA DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM RENDA FIXA"
+
+    # Cambial
+    if "CAMBIAL" in tc or "CAMBIAL" in nf:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO CAMBIAL DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO CAMBIAL"
+        return "FUNDO DE INVESTIMENTO CAMBIAL DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO CAMBIAL"
+
+    # Referenciado
+    if "REFERENCIADO" in tc or "REFERENCIADO" in nf:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO REFERENCIADOS DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO REFERENCIADOS"
+        return "FUNDO DE INVESTIMENTO REFERENCIADO DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO REFERENCIADO"
+
+    # Dívida Externa
+    if "DIVIDA EXTERNA" in tc or "DIVIDA EXTERNA" in nf:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA"
+        return "FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA"
+
+    # Previdenciário
+    if "PREVIDENCIARIO" in tc or "PREVIDENCIARIO" in nf:
+        return "FUNDO DE INVESTIMENTO PREVIDENCIARIO"
+
+    # Índice de Mercado
+    if "INDICE DE MERCADO" in tc or "INDICE DE MERCADO" in nf:
+        return "FUNDO DE INVESTIMENTO EM INDICE DE MERCADO"
+
+    # Curto Prazo
+    if is_cp:
+        if is_fic:
+            return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE CURTO PRAZO"
+        return "FUNDO DE INVESTIMENTO DE CURTO PRAZO"
+
     return tipo_classe if tipo_classe else "Outros"
 
 async def download_cvm_zip(client: httpx.AsyncClient) -> bytes:
@@ -96,6 +231,7 @@ def parse_cvm_csvs(zip_bytes: bytes) -> Dict[str, Dict[str, Any]]:
             idx_dt_const = find_col(header, ['Data_Constituicao'])
             idx_dt_reg = find_col(header, ['Data_Registro'])
             idx_dt_sit = find_col(header, ['Data_Inicio_Situacao'])
+            idx_tipo_fundo = find_col(header, ['Tipo_Fundo'])
 
             # Helper para padronizar CNPJs (inclusive recolocar zeros à esquerda perdidos pelo CSV)
             def clean_cnpj(c):
@@ -108,6 +244,16 @@ def parse_cvm_csvs(zip_bytes: bytes) -> Dict[str, Dict[str, Any]]:
                 id_reg = row[idx_id].strip()
                 if not cnpj or not id_reg: continue
                 
+                g_cnpj = clean_cnpj(row[idx_cnpj_gestor]) if idx_cnpj_gestor >= 0 else ""
+                g_nome = normalize_text(row[idx_gestor].strip()) if idx_gestor >= 0 else ""
+                
+                if id_reg in funds:
+                    if g_cnpj or g_nome:
+                        gestor_existe = any(g["cnpj"] == g_cnpj and g["nome"] == g_nome for g in funds[id_reg].get("gestores_cvm", []))
+                        if not gestor_existe:
+                            funds[id_reg].setdefault("gestores_cvm", []).append({"cnpj": g_cnpj, "nome": g_nome})
+                    continue
+                
                 funds[id_reg] = {
                     "id_registro_fundo": id_reg,
                     "cnpj_fundo": cnpj,
@@ -117,13 +263,16 @@ def parse_cvm_csvs(zip_bytes: bytes) -> Dict[str, Dict[str, Any]]:
                     "situacao_cvm": row[idx_sit].strip() if idx_sit >= 0 else "",
                     "administrador_cnpj_csv": clean_cnpj(row[idx_cnpj_adm]) if idx_cnpj_adm >= 0 else "",
                     "administrador_nome_csv": normalize_text(row[idx_adm].strip()) if idx_adm >= 0 else "",
-                    "gestor_cnpj_csv": clean_cnpj(row[idx_cnpj_gestor]) if idx_cnpj_gestor >= 0 else "",
-                    "gestor_nome_csv": normalize_text(row[idx_gestor].strip()) if idx_gestor >= 0 else "",
+                    "gestor_cnpj_csv": g_cnpj,
+                    "gestor_nome_csv": g_nome,
+                    "gestores_cvm": [{"cnpj": g_cnpj, "nome": g_nome}] if (g_cnpj or g_nome) else [],
                     
                     "diretor_responsavel_cvm": row[idx_diretor].strip() if idx_diretor >= 0 else "",
                     "data_constituicao_cvm": row[idx_dt_const].strip() if idx_dt_const >= 0 else "",
                     "data_registro_cvm": row[idx_dt_reg].strip() if idx_dt_reg >= 0 else "",
                     "data_situacao_cvm": row[idx_dt_sit].strip() if idx_dt_sit >= 0 else "",
+                    "tipo_fundo_cvm": row[idx_tipo_fundo].strip() if idx_tipo_fundo >= 0 else "",
+                    "denominacao_social_fundo_cvm": row[idx_razao].strip() if idx_razao >= 0 else "",
                     
                     "cnpj_classe_csv": "",
                     "codigo_cvm_classe": "",
@@ -167,7 +316,9 @@ def parse_cvm_csvs(zip_bytes: bytes) -> Dict[str, Dict[str, Any]]:
                         fund = funds[id_reg]
                         if idx_cnpj_cls >= 0 and row[idx_cnpj_cls].strip(): fund["cnpj_classe_csv"] = clean_cnpj(row[idx_cnpj_cls])
                         if idx_cvm_cls >= 0 and row[idx_cvm_cls].strip(): fund["codigo_cvm_classe"] = row[idx_cvm_cls].strip().zfill(7)
-                        if idx_razao >= 0 and row[idx_razao].strip(): fund["razao_social_classe_csv"] = row[idx_razao].strip()
+                        if idx_razao >= 0 and row[idx_razao].strip(): 
+                            fund["razao_social_classe_csv"] = row[idx_razao].strip()
+                            fund["denominacao_social_classe_csv"] = row[idx_razao].strip()
                         
                         forma = row[idx_forma].strip() if idx_forma >= 0 else ""
                         fund["forma_condominio_csv"] = forma
@@ -175,7 +326,7 @@ def parse_cvm_csvs(zip_bytes: bytes) -> Dict[str, Dict[str, Any]]:
                         
                         tipo_cls = row[idx_tipo_classe].strip() if idx_tipo_classe >= 0 else ""
                         anbima_cls = row[idx_class_anb].strip() if idx_class_anb >= 0 else ""
-                        fund["natureza_economica_cvm"] = map_natureza_economica(tipo_cls, anbima_cls)
+                        fund["natureza_economica_cvm"] = map_natureza_economica_b3(fund.get("tipo_fundo_cvm", ""), tipo_cls, anbima_cls, fund.get("razao_social_normalizada", ""))
                         fund["tipo_classe_cvm"] = tipo_cls
                         
                         if idx_cnpj_cust >= 0 and row[idx_cnpj_cust].strip(): fund["custodiante_cnpj_csv"] = clean_cnpj(row[idx_cnpj_cust])
@@ -297,27 +448,31 @@ async def fetch_anbima_lote(client: httpx.AsyncClient, client_id: str, token: st
         if not cnpj: continue
         
         prest_adm = None
-        prest_gestor = None
+        prest_gestores = []
         for p in r.get("prestadores_fundo", []) or r.get("prestadores", []) or []:
             tipo = str(p.get("codigo_tipo_prestador") or p.get("tipo_prestador") or p.get("tipoPrestador") or "").upper()
             item = {
                 "identificador": p.get("identificador") or p.get("cpf_cnpj") or p.get("cpfCnpj"),
                 "nome": p.get("razao_social") or p.get("razaoSocial") or p.get("nome_ou_razao_social")
             }
-            if "ADMIN" in tipo and not prest_adm: prest_adm = item
-            elif "GESTOR" in tipo and not prest_gestor: prest_gestor = item
+            if "ADMIN" in tipo and not prest_adm: 
+                prest_adm = item
+            elif "GESTOR" in tipo: 
+                prest_gestores.append(item)
             
         mapped.append({
             "cnpj_fundo": str(cnpj),
             "razao_social_anbima": r.get("razao_social_fundo"),
             "administrador_anbima": prest_adm,
-            "gestor_anbima": prest_gestor
+            "gestores_anbima": prest_gestores,
+            "gestor_anbima": prest_gestores[0] if prest_gestores else None
         })
         
     logger.info(f"Total de fundos processados da ANBIMA: {len(mapped)}")
     return mapped
 
-def consolidate_fund(f: Dict[str, Any]) -> Dict[str, Any]:
+def consolidate_fund(f: Dict[str, Any], adm_data: Dict[str, Dict[str, str]] = None) -> Dict[str, Any]:
+    if adm_data is None: adm_data = {}
     def choose(*args):
         for a in args:
             if a is not None and a != "": return a
@@ -325,6 +480,9 @@ def consolidate_fund(f: Dict[str, Any]) -> Dict[str, Any]:
 
     adm_anb = f.get("_anbima", {}).get("administrador_anbima", {}) or {}
     gestor_anb = f.get("_anbima", {}).get("gestor_anbima", {}) or {}
+    
+    gestores_anb = f.get("_anbima", {}).get("gestores_anbima", [])
+    gestores_cvm = f.get("gestores_cvm", [])
 
     razao_final = choose(f.get("razao_social_cvm"), f.get("_anbima", {}).get("razao_social_anbima"), f.get("razao_social_classe_csv"))
     
@@ -336,6 +494,42 @@ def consolidate_fund(f: Dict[str, Any]) -> Dict[str, Any]:
     gestor_id = choose(f.get("gestor_cnpj_csv"), gestor_anb.get("identificador"))
     if gestor_id: gestor_id = gestor_id.zfill(14)
     
+    gestores_mapeados = []
+    _vistos = set()
+    
+    def append_gestor(g_id, g_nome):
+        g_id = str(g_id).zfill(14) if g_id else ""
+        chave = g_id if g_id else g_nome
+        if chave and chave not in _vistos:
+            _vistos.add(chave)
+            g_info = adm_data.get(g_id, {}) if g_id else {}
+            gestores_mapeados.append({
+                "id": g_id,
+                "nome": g_nome,
+                "endereco": g_info.get("endereco"),
+                "telefones": g_info.get("telefones"),
+                "email": g_info.get("email")
+            })
+
+    for g in gestores_cvm: append_gestor(g.get("cnpj"), g.get("nome"))
+    for g in gestores_anb: append_gestor(g.get("identificador"), g.get("nome"))
+    
+    # Lógica heurística não destrutiva para o "Gestor Mais Provável"
+    gestor_provavel = None
+    if gestores_mapeados:
+        if len(gestores_mapeados) == 1:
+            gestor_provavel = gestores_mapeados[0]
+        else:
+            # 1. Tenta por raiz do CNPJ (igual ao Administrador)
+            raiz_adm = adm_id[:8] if adm_id and len(adm_id) >= 8 else None
+            for gm in gestores_mapeados:
+                if raiz_adm and gm["id"] and gm["id"][:8] == raiz_adm:
+                    gestor_provavel = gm
+                    break
+            # 2. Fallback: Primeiro da lista (Geralmente ANBIMA ou primeiro CVM)
+            if not gestor_provavel:
+                gestor_provavel = gestores_mapeados[0]
+                
     # Controlador é frequentemente o Escriturador
     escriturador_nome = choose(f.get("controlador_nome_csv"), f.get("custodiante_nome_csv"))
     escriturador_id = choose(f.get("controlador_cnpj_csv"), f.get("custodiante_cnpj_csv"))
@@ -364,12 +558,18 @@ def consolidate_fund(f: Dict[str, Any]) -> Dict[str, Any]:
     if not nat_eco: gaps.append("natureza_economica")
     if not nat_jur: gaps.append("natureza_juridica")
 
-    adm_info = f.get("_adm_info", {})
+    adm_info = adm_data.get(adm_id, {}) if adm_id else {}
+    gestor_info = adm_data.get(gestor_id, {}) if gestor_id else {}
+    escriturador_info = adm_data.get(escriturador_id, {}) if escriturador_id else {}
+    custodiante_info = adm_data.get(custodiante_id, {}) if custodiante_id else {}
 
     return {
         "cnpj_fundo": f.get("cnpj_fundo"),
         "cnpj_classe": f.get("cnpj_classe_csv"),
         "tipo_classe": f.get("tipo_classe_cvm"),
+        "tipo_fundo": f.get("tipo_fundo_cvm"),
+        "denominacao_social_fundo": f.get("denominacao_social_fundo_cvm"),
+        "denominacao_social_classe": f.get("denominacao_social_classe_csv"),
         "id_registro_fundo": f.get("id_registro_fundo"),
         "codigo_cvm_fundo": f.get("codigo_cvm_fundo"),
         "codigo_cvm_classe": f.get("codigo_cvm_classe"),
@@ -387,12 +587,27 @@ def consolidate_fund(f: Dict[str, Any]) -> Dict[str, Any]:
         "administrador_endereco": adm_info.get("endereco"),
         "administrador_telefones": adm_info.get("telefones"),
         "administrador_email": adm_info.get("email"),
+        
+        "gestores_mapeados": gestores_mapeados,
+        "multiplos_gestores": len(gestores_mapeados) > 1,
+        "gestor_mais_provavel_id": gestor_provavel.get("id") if gestor_provavel else None,
+        "gestor_mais_provavel_nome": gestor_provavel.get("nome") if gestor_provavel else None,
+        
         "gestor_id": gestor_id,
         "gestor_nome": gestor_nome,
+        "gestor_endereco": gestor_info.get("endereco"),
+        "gestor_telefones": gestor_info.get("telefones"),
+        "gestor_email": gestor_info.get("email"),
         "escriturador_id": escriturador_id,
         "escriturador_nome": escriturador_nome,
+        "escriturador_endereco": escriturador_info.get("endereco"),
+        "escriturador_telefones": escriturador_info.get("telefones"),
+        "escriturador_email": escriturador_info.get("email"),
         "custodiante_id": custodiante_id,
         "custodiante_nome": custodiante_nome,
+        "custodiante_endereco": custodiante_info.get("endereco"),
+        "custodiante_telefones": custodiante_info.get("telefones"),
+        "custodiante_email": custodiante_info.get("email"),
         "natureza_economica_final": nat_eco,
         "natureza_juridica_final": nat_jur,
         "situacao_final": f.get("situacao_cvm"),
@@ -445,9 +660,6 @@ async def execute_pipeline(req: dict):
             anb_by_cnpj = {a["cnpj_fundo"]: a for a in anbima_data}
             for f in funds.values():
                 f["_anbima"] = anb_by_cnpj.get(f["cnpj_fundo"], {})
-                
-                adm_cnpj = "".join(c for c in str(f.get("administrador_cnpj_csv") or "") if c.isdigit())
-                f["_adm_info"] = adm_data.get(adm_cnpj, {})
 
             to_process = list(funds.values())
             if limit > 0:
@@ -459,7 +671,7 @@ async def execute_pipeline(req: dict):
         # Sem mais chamadas a APIs instáveis da CVM, apenas cruzamento de dados em memória
         results = []
         for i, f in enumerate(to_process):
-            results.append(consolidate_fund(f))
+            results.append(consolidate_fund(f, adm_data))
             if i % 10000 == 0:
                 global_job_status["progress"] = i
 
@@ -483,7 +695,19 @@ async def execute_pipeline(req: dict):
             "codigoCVM": "CETIP.P_ATUALIZA_CODIGO_CVM",
             "administradorEndereco": "CETIP.P_ATUALIZA_ADM_ENDERECO",
             "administradorTelefones": "CETIP.P_ATUALIZA_ADM_TELEFONES",
-            "administradorEmail": "CETIP.P_ATUALIZA_ADM_EMAIL"
+            "administradorEmail": "CETIP.P_ATUALIZA_ADM_EMAIL",
+            "gestorEndereco": "CETIP.P_ATUALIZA_GESTOR_ENDERECO",
+            "gestorTelefones": "CETIP.P_ATUALIZA_GESTOR_TELEFONES",
+            "gestorEmail": "CETIP.P_ATUALIZA_GESTOR_EMAIL",
+            "escrituradorEndereco": "CETIP.P_ATUALIZA_ESCRITURADOR_ENDERECO",
+            "escrituradorTelefones": "CETIP.P_ATUALIZA_ESCRITURADOR_TELEFONES",
+            "escrituradorEmail": "CETIP.P_ATUALIZA_ESCRITURADOR_EMAIL",
+            "custodianteEndereco": "CETIP.P_ATUALIZA_CUSTODIANTE_ENDERECO",
+            "custodianteTelefones": "CETIP.P_ATUALIZA_CUSTODIANTE_TELEFONES",
+            "custodianteEmail": "CETIP.P_ATUALIZA_CUSTODIANTE_EMAIL",
+            "tipoFundo": "CETIP.P_ATUALIZA_TIPO_FUNDO",
+            "denominacaoSocialFundo": "CETIP.P_ATUALIZA_DENOMINACAO_FUNDO",
+            "denominacaoSocialClasse": "CETIP.P_ATUALIZA_DENOMINACAO_CLASSE"
         })
         
         def esc_sql(s):
@@ -526,6 +750,30 @@ async def execute_pipeline(req: dict):
                 sql_lines.append(f"{procedures['administradorTelefones']}('{cnpj}','{esc_sql(r.get('administrador_telefones'))}');")
             if procedures.get("administradorEmail") and r.get("administrador_email"):
                 sql_lines.append(f"{procedures['administradorEmail']}('{cnpj}','{esc_sql(r.get('administrador_email'))}');")
+            if procedures.get("gestorEndereco") and r.get("gestor_endereco"):
+                sql_lines.append(f"{procedures['gestorEndereco']}('{cnpj}','{esc_sql(r.get('gestor_endereco'))}');")
+            if procedures.get("gestorTelefones") and r.get("gestor_telefones"):
+                sql_lines.append(f"{procedures['gestorTelefones']}('{cnpj}','{esc_sql(r.get('gestor_telefones'))}');")
+            if procedures.get("gestorEmail") and r.get("gestor_email"):
+                sql_lines.append(f"{procedures['gestorEmail']}('{cnpj}','{esc_sql(r.get('gestor_email'))}');")
+            if procedures.get("escrituradorEndereco") and r.get("escriturador_endereco"):
+                sql_lines.append(f"{procedures['escrituradorEndereco']}('{cnpj}','{esc_sql(r.get('escriturador_endereco'))}');")
+            if procedures.get("escrituradorTelefones") and r.get("escriturador_telefones"):
+                sql_lines.append(f"{procedures['escrituradorTelefones']}('{cnpj}','{esc_sql(r.get('escriturador_telefones'))}');")
+            if procedures.get("escrituradorEmail") and r.get("escriturador_email"):
+                sql_lines.append(f"{procedures['escrituradorEmail']}('{cnpj}','{esc_sql(r.get('escriturador_email'))}');")
+            if procedures.get("custodianteEndereco") and r.get("custodiante_endereco"):
+                sql_lines.append(f"{procedures['custodianteEndereco']}('{cnpj}','{esc_sql(r.get('custodiante_endereco'))}');")
+            if procedures.get("custodianteTelefones") and r.get("custodiante_telefones"):
+                sql_lines.append(f"{procedures['custodianteTelefones']}('{cnpj}','{esc_sql(r.get('custodiante_telefones'))}');")
+            if procedures.get("custodianteEmail") and r.get("custodiante_email"):
+                sql_lines.append(f"{procedures['custodianteEmail']}('{cnpj}','{esc_sql(r.get('custodiante_email'))}');")
+            if procedures.get("tipoFundo") and r.get("tipo_fundo"):
+                sql_lines.append(f"{procedures['tipoFundo']}('{cnpj}','{esc_sql(r.get('tipo_fundo'))}');")
+            if procedures.get("denominacaoSocialFundo") and r.get("denominacao_social_fundo"):
+                sql_lines.append(f"{procedures['denominacaoSocialFundo']}('{cnpj}','{esc_sql(r.get('denominacao_social_fundo'))}');")
+            if procedures.get("denominacaoSocialClasse") and r.get("denominacao_social_classe"):
+                sql_lines.append(f"{procedures['denominacaoSocialClasse']}('{cnpj}','{esc_sql(r.get('denominacao_social_classe'))}');")
                 
         # Usa apenas o nome do arquivo para garantir que seja salvo na pasta do script Python (Windows), ignorando caminhos do Linux
         sql_filename = os.path.basename(req.get("sql_output_path", "update_fundos.sql"))
@@ -631,4 +879,5 @@ async def cli_main():
 
 if __name__ == "__main__":
     asyncio.run(cli_main())
+
 
