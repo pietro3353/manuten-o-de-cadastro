@@ -110,7 +110,7 @@ def map_natureza_economica_b3(tipo_fundo: str, tipo_classe: str, class_anbima: s
     tc_words = tc.split()
 
     # Modificadores Globais
-    is_fic = "FIC" in nf_words or "COTAS" in nf or "QUOTAS" in nf or "FICFIDC" in nf or "FIQFIDC" in nf or "FICFIP" in nf
+    is_fic = "FIC" in nf_words or "COTAS" in nf or "QUOTAS" in nf or "FICFIDC" in nf or "FIQFIDC" in nf or "FICFIP" in nf or "FIC" in tf_words or "FIC" in tc_words
     is_lp = "LONGO PRAZO" in tc or "LONGO PRAZO" in nf or " LP " in nf or nf.endswith(" LP")
     is_cp = "CURTO PRAZO" in tc or "CURTO PRAZO" in nf or " CP " in nf or nf.endswith(" CP")
 
@@ -118,6 +118,34 @@ def map_natureza_economica_b3(tipo_fundo: str, tipo_classe: str, class_anbima: s
     # PASSO 1: Tipos Macro (Categorias Exclusivas)
     # ==========================================
     
+    # Macro FIAGRO
+    if "FIAGRO" in tf_words or "FIAGRO" in tc_words or "AGROINDUSTRIAIS" in tf or "AGRO" in nf_words:
+        return "FUNDO DE INVESTIMENTO NAS CADEIAS PRODUTIVAS AGROINDUSTRIAIS"
+
+    # Macro FIIM
+    if "FIIM" in tf_words or "FIIM" in tc_words or "INDICE DE MERCADO" in tc or "INDICE DE MERCADO" in nf:
+        return "FUNDO DE INVESTIMENTO EM INDICE DE MERCADO"
+
+    # Macro FUNCINE
+    if "FUNCINE" in tf_words or "FUNCINE" in tc_words or "CINEMATOGRAFICA" in nf:
+        return "FUNCINE FUNDO DE FINANCIAMENTO DA INDUSTRIA CINEMATOGRAFICA NACIONAL"
+
+    # Macro FAPI
+    if "FAPI" in tf_words or "FAPI" in tc_words or "APOSENTADORIA" in nf:
+        return "FUNDO DE APOSENTADORIA PROGRAMADA INDIVIDUAL - FAPI"
+
+    # Macro FICART
+    if "FICART" in tf_words or "FICART" in tc_words or "CULTURAL E ARTISTICO" in nf:
+        return "FUNDO DE INVESTIMENTO CULTURAL E ARTISTICO - FICART"
+
+    # Macro FMIEE
+    if "FMIEE" in tf_words or "FMIEE" in tc_words or "EMPRESAS EMERGENTES" in nf:
+        return "FUNDO MUTUO DE INVESTIMENTO EM EMPRESAS EMERGENTES"
+
+    # Macro FMP-FGTS
+    if "FMP-FGTS" in tf or "FGTS" in nf or "FMP-FGTS" in tc:
+        return "FUNDO DE PRIVATIZACAO - FGTS"
+
     # Macro FII
     if "FII" in tf_words or "IMOBILIARIO" in tf or "FII" in nf_words or "IMOBILIARIO" in nf:
         return "FUNDO DE INVESTIMENTO IMOBILIARIO"
@@ -139,47 +167,47 @@ def map_natureza_economica_b3(tipo_fundo: str, tipo_classe: str, class_anbima: s
     # ==========================================
     
     # Ações
-    if "ACOES" in tc_words or "ACOES" in nf or "ACAO" in nf:
+    if "ACOES" in tc_words or "ACOES" in nf or "ACAO" in nf or "FMIA" in tf_words or "FMIA" in tc_words or "ACOES" in ca or "ACAO" in ca:
         if is_fic:
             return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM ACOES"
         return "FUNDO DE INVESTIMENTO EM ACOES"
 
     # Multimercado
-    if "MULTIMERCADO" in tc_words or "MULTIMERCADO" in nf:
+    if "MULTIMERCADO" in tc_words or "MULTIMERCADO" in nf or "MULTIMERCADO" in ca or "MULT" in nf_words:
         if is_fic:
             return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO MULTIMERCADO DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO MULTIMERCADO"
         return "FUNDO DE INVESTIMENTO MULTIMERCADO DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO MULTIMERCADO"
 
     # Renda Fixa
-    if "RENDA FIXA" in tc or "RENDA FIXA" in nf:
+    if "RENDA FIXA" in tc or "RENDA FIXA" in nf or "RENDA FIXA" in ca:
         if is_fic:
             return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE RENDA FIXA DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE RENDA FIXA"
         return "FUNDO DE INVESTIMENTO EM RENDA FIXA DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM RENDA FIXA"
 
     # Cambial
-    if "CAMBIAL" in tc or "CAMBIAL" in nf:
+    if "CAMBIAL" in tc or "CAMBIAL" in nf or "CAMBIAL" in ca:
         if is_fic:
             return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO CAMBIAL DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO CAMBIAL"
         return "FUNDO DE INVESTIMENTO CAMBIAL DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO CAMBIAL"
 
     # Referenciado
-    if "REFERENCIADO" in tc or "REFERENCIADO" in nf:
+    if "REFERENCIADO" in tc or "REFERENCIADO" in nf or "REFERENCIADO" in ca:
         if is_fic:
             return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO REFERENCIADOS DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO REFERENCIADOS"
         return "FUNDO DE INVESTIMENTO REFERENCIADO DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO REFERENCIADO"
 
     # Dívida Externa
-    if "DIVIDA EXTERNA" in tc or "DIVIDA EXTERNA" in nf:
+    if "DIVIDA EXTERNA" in tc or "DIVIDA EXTERNA" in nf or "DIVIDA EXTERNA" in ca:
         if is_fic:
             return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA"
         return "FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA DE LONGO PRAZO" if is_lp else "FUNDO DE INVESTIMENTO EM DIVIDA EXTERNA"
 
     # Previdenciário
-    if "PREVIDENCIARIO" in tc or "PREVIDENCIARIO" in nf:
+    if "PREVIDENCIARIO" in tc or "PREVIDENCIARIO" in nf or "PREVIDENCIARIO" in ca or "PREV" in nf_words or "PGBL" in nf_words or "VGBL" in nf_words:
         return "FUNDO DE INVESTIMENTO PREVIDENCIARIO"
 
     # Índice de Mercado
-    if "INDICE DE MERCADO" in tc or "INDICE DE MERCADO" in nf:
+    if "INDICE DE MERCADO" in tc or "INDICE DE MERCADO" in nf or "INDICE DE MERCADO" in ca:
         return "FUNDO DE INVESTIMENTO EM INDICE DE MERCADO"
 
     # Curto Prazo
@@ -188,7 +216,7 @@ def map_natureza_economica_b3(tipo_fundo: str, tipo_classe: str, class_anbima: s
             return "FUNDO DE INVESTIMENTO EM QUOTAS DE FUNDO DE INVESTIMENTO DE CURTO PRAZO"
         return "FUNDO DE INVESTIMENTO DE CURTO PRAZO"
 
-    return tipo_classe if tipo_classe else "Outros"
+    return ""
 
 async def download_cvm_zip(client: httpx.AsyncClient) -> bytes:
     logger.info(f"Fazendo download do arquivo ZIP da CVM: {CVM_ZIP_URL}")
@@ -326,7 +354,7 @@ def parse_cvm_csvs(zip_bytes: bytes) -> Dict[str, Dict[str, Any]]:
                         
                         tipo_cls = row[idx_tipo_classe].strip() if idx_tipo_classe >= 0 else ""
                         anbima_cls = row[idx_class_anb].strip() if idx_class_anb >= 0 else ""
-                        fund["natureza_economica_cvm"] = map_natureza_economica_b3(fund.get("tipo_fundo_cvm", ""), tipo_cls, anbima_cls, fund.get("razao_social_normalizada", ""))
+                        fund["classificacao_anbima_cvm"] = anbima_cls
                         fund["tipo_classe_cvm"] = tipo_cls
                         
                         if idx_cnpj_cust >= 0 and row[idx_cnpj_cust].strip(): fund["custodiante_cnpj_csv"] = clean_cnpj(row[idx_cnpj_cust])
@@ -539,7 +567,12 @@ def consolidate_fund(f: Dict[str, Any], adm_data: Dict[str, Dict[str, str]] = No
     custodiante_id = f.get("custodiante_cnpj_csv")
     if custodiante_id: custodiante_id = custodiante_id.zfill(14)
     
-    nat_eco = f.get("natureza_economica_cvm")
+    nat_eco = map_natureza_economica_b3(
+        f.get("tipo_fundo_cvm", ""),
+        f.get("tipo_classe_cvm", ""),
+        f.get("classificacao_anbima_cvm", ""),
+        razao_final or f.get("razao_social_normalizada", "")
+    )
     nat_jur_raw = f.get("natureza_juridica_cvm", "").strip().upper()
     
     if "ABERTO" in nat_jur_raw:
@@ -713,25 +746,42 @@ async def execute_pipeline(req: dict):
         def esc_sql(s):
             return str(s or "").replace("'", "''")
 
+        _cancelados_ignorados = 0
+        _gestor_ambiguo = 0
+
         for r in results:
             cnpj = r.get("cnpj_fundo")
             if not cnpj: continue
+
+            # TRAVA 1 - PERFORMANCE: Ignora fundos cancelados na geração SQL.
+            # O JSON de saída permanece completo para auditoria.
+            situacao = (r.get("situacao_final") or "").upper()
+            if "CANCELAD" in situacao:
+                _cancelados_ignorados += 1
+                continue
             
             if procedures.get("razaoSocial") and r.get("razao_social_final"):
                 rz = r.get("razao_social_normalizada") or r.get("razao_social_final")
                 sql_lines.append(f"{procedures['razaoSocial']}('{cnpj}','{esc_sql(rz)}');")
             if procedures.get("administrador") and r.get("administrador_id") and r.get("administrador_nome"):
                 sql_lines.append(f"{procedures['administrador']}('{cnpj}','{r.get('administrador_id')}','{esc_sql(r.get('administrador_nome'))}');")
-            if procedures.get("gestor") and r.get("gestor_id") and r.get("gestor_nome"):
-                sql_lines.append(f"{procedures['gestor']}('{cnpj}','{r.get('gestor_id')}','{esc_sql(r.get('gestor_nome'))}');")
+            # TRAVA 3 - SEGURANÇA DE DADOS: Só atualiza gestor se não houver ambiguidade (gestor único).
+            # Fundos com múltiplos gestores na CVM são ignorados para evitar corrupção.
+            if not r.get("multiplos_gestores"):
+                if procedures.get("gestor") and r.get("gestor_id") and r.get("gestor_nome"):
+                    sql_lines.append(f"{procedures['gestor']}('{cnpj}','{r.get('gestor_id')}','{esc_sql(r.get('gestor_nome'))}');")
+            else:
+                _gestor_ambiguo += 1
             if procedures.get("escriturador") and r.get("escriturador_id") and r.get("escriturador_nome"):
                 sql_lines.append(f"{procedures['escriturador']}('{cnpj}','{r.get('escriturador_id')}','{esc_sql(r.get('escriturador_nome'))}');")
             if procedures.get("custodiante") and r.get("custodiante_id") and r.get("custodiante_nome"):
                 sql_lines.append(f"{procedures['custodiante']}('{cnpj}','{r.get('custodiante_id')}','{esc_sql(r.get('custodiante_nome'))}');")
             if procedures.get("naturezaEconomica") and r.get("natureza_economica_final"):
                 sql_lines.append(f"{procedures['naturezaEconomica']}('{cnpj}','{esc_sql(r.get('natureza_economica_final'))}');")
-            if procedures.get("naturezaJuridica") and r.get("natureza_juridica_final"):
-                sql_lines.append(f"{procedures['naturezaJuridica']}('{cnpj}','{esc_sql(r.get('natureza_juridica_final'))}');")
+            # TRAVA 2 - REGRA DE NEGÓCIO: Geração de Natureza Jurídica PERMANENTEMENTE DESATIVADA.
+            # A área de negócios proibiu a alteração automatizada do status Aberto/Fechado.
+            # if procedures.get("naturezaJuridica") and r.get("natureza_juridica_final"):
+            #     sql_lines.append(f"{procedures['naturezaJuridica']}('{cnpj}','{esc_sql(r.get('natureza_juridica_final'))}');")
                 
             # Novos campos
             if procedures.get("diretorResponsavel") and r.get("diretor_responsavel"):
@@ -750,12 +800,14 @@ async def execute_pipeline(req: dict):
                 sql_lines.append(f"{procedures['administradorTelefones']}('{cnpj}','{esc_sql(r.get('administrador_telefones'))}');")
             if procedures.get("administradorEmail") and r.get("administrador_email"):
                 sql_lines.append(f"{procedures['administradorEmail']}('{cnpj}','{esc_sql(r.get('administrador_email'))}');")
-            if procedures.get("gestorEndereco") and r.get("gestor_endereco"):
-                sql_lines.append(f"{procedures['gestorEndereco']}('{cnpj}','{esc_sql(r.get('gestor_endereco'))}');")
-            if procedures.get("gestorTelefones") and r.get("gestor_telefones"):
-                sql_lines.append(f"{procedures['gestorTelefones']}('{cnpj}','{esc_sql(r.get('gestor_telefones'))}');")
-            if procedures.get("gestorEmail") and r.get("gestor_email"):
-                sql_lines.append(f"{procedures['gestorEmail']}('{cnpj}','{esc_sql(r.get('gestor_email'))}');")
+            # TRAVA 3 - SEGURANÇA: Contatos do gestor protegidos pela mesma trava de ambiguidade.
+            if not r.get("multiplos_gestores"):
+                if procedures.get("gestorEndereco") and r.get("gestor_endereco"):
+                    sql_lines.append(f"{procedures['gestorEndereco']}('{cnpj}','{esc_sql(r.get('gestor_endereco'))}');")
+                if procedures.get("gestorTelefones") and r.get("gestor_telefones"):
+                    sql_lines.append(f"{procedures['gestorTelefones']}('{cnpj}','{esc_sql(r.get('gestor_telefones'))}');")
+                if procedures.get("gestorEmail") and r.get("gestor_email"):
+                    sql_lines.append(f"{procedures['gestorEmail']}('{cnpj}','{esc_sql(r.get('gestor_email'))}');")
             if procedures.get("escrituradorEndereco") and r.get("escriturador_endereco"):
                 sql_lines.append(f"{procedures['escrituradorEndereco']}('{cnpj}','{esc_sql(r.get('escriturador_endereco'))}');")
             if procedures.get("escrituradorTelefones") and r.get("escriturador_telefones"):
@@ -779,8 +831,9 @@ async def execute_pipeline(req: dict):
         sql_filename = os.path.basename(req.get("sql_output_path", "update_fundos.sql"))
         with open(sql_filename, "w", encoding="utf-8") as f:
             f.write("\n".join(sql_lines))
-            
-        global_job_status = {"status": "done", "message": "Processo concluído super rápido!", "progress": len(to_process), "total": len(to_process)}
+
+        logger.info(f"SQL gerado: {len(sql_lines)} linhas | Cancelados ignorados: {_cancelados_ignorados} | Gestores ambíguos bloqueados: {_gestor_ambiguo}")
+        global_job_status = {"status": "done", "message": "Processo concluído!", "progress": len(to_process), "total": len(to_process), "sql_lines": len(sql_lines), "cancelados_ignorados": _cancelados_ignorados, "gestores_ambiguos": _gestor_ambiguo}
         logger.info("Processo concluído com sucesso!")
     except Exception as e:
         logger.error(f"Erro durante execução: {e}")
@@ -809,6 +862,21 @@ class SimpleWorkerHandler(BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": "File not found"}).encode('utf-8'))
+        elif self.path == "/download-sql":
+            try:
+                sql_filename = "update_fundos.sql"
+                with open(sql_filename, "rb") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/sql')
+                self.send_header('Content-Disposition', f'attachment; filename="{sql_filename}"')
+                self.end_headers()
+                self.wfile.write(content)
+            except Exception as e:
+                self.send_response(404)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Arquivo SQL não encontrado. Execute o pipeline primeiro."}).encode('utf-8'))
         elif self.path == "/stop":
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -879,5 +947,4 @@ async def cli_main():
 
 if __name__ == "__main__":
     asyncio.run(cli_main())
-
 
