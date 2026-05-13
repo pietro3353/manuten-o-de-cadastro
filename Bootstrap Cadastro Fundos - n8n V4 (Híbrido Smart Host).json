@@ -1,5 +1,5 @@
 {
-  "name": "Bootstrap Cadastro Fundos - n8n V4 (Híbrido Smart Host)",
+  "name": "Bootstrap Cadastro Fundos - n8n V5 (Produção - SQL via Python)",
   "nodes": [
     {
       "parameters": {},
@@ -14,7 +14,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{\n  json: {\n    output_path: 'resultado_cvm.json',\n    sql_output_path: '/tmp/update_fundos.sql',\n    anbima_client_id: 'lFzaX80V5YmN',\n    anbima_client_secret: 'y4pPIlkqeg2b',\n    python_concurrency: 100,\n    // Procedures\n    procedures: {\n      razaoSocial: 'CETIP.P_ATUALIZA_RAZAO_SOCIAL',\n      administrador: 'CETIP.P_ATUALIZA_ADMINISTRADOR',\n      gestor: 'CETIP.P_ATUALIZA_GESTOR',\n      escriturador: 'CETIP.P_ATUALIZA_ESCRITURADOR',\n      naturezaEconomica: 'CETIP.P_ATUALIZA_NATUREZA_ECONOMICA',\n      naturezaJuridica: 'CETIP.P_ATUALIZA_NATUREZA_JURIDICA',\n      tipoFundo: 'CETIP.P_ATUALIZA_TIPO_FUNDO',\n      denominacaoSocialFundo: 'CETIP.P_ATUALIZA_DENOMINACAO_FUNDO',\n      denominacaoSocialClasse: 'CETIP.P_ATUALIZA_DENOMINACAO_CLASSE'\n    }\n  }\n}];"
+        "jsCode": "return [{\n  json: {\n    output_path: 'resultado_cvm.json',\n    sql_output_path: 'update_fundos.sql',\n    anbima_client_id: '',\n    anbima_client_secret: '',\n    python_concurrency: 100\n    // Procedures e geração SQL agora são 100% controlados pelo Python Worker.\n    // Travas de produção ativas: filtro cancelados, bloqueio nat. jurídica, guarda múltiplos gestores.\n  }\n}];"
       },
       "id": "config-node-1",
       "name": "Configurações Globais",
@@ -27,7 +27,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const cfg = $input.first().json;\n\nasync function tryPing(url) {\n  try {\n    await this.helpers.httpRequest({\n      method: 'GET',\n      url: `${url}/status`,\n      timeout: 2000\n    });\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\n// 1. Tenta acessar via localhost (Funciona no Windows Local/Nativo)\nlet worker_url = 'http://127.0.0.1:8000';\nlet isAlive = await tryPing(worker_url);\n\n// 2. Se falhar, tenta host.docker.internal (Funciona quando n8n está no Docker)\nif (!isAlive) {\n  worker_url = 'http://host.docker.internal:8000';\n  isAlive = await tryPing(worker_url);\n}\n\n// 3. Se falhar, tenta o IP da rede local como último recurso\nif (!isAlive) {\n  worker_url = 'http://192.168.15.40:8000';\n  isAlive = await tryPing(worker_url);\n}\n\nif (!isAlive) {\n  worker_url = 'http://10.233.10.185:8000';\n  isAlive = await tryPing(worker_url);\n}\n\nif (!isAlive) {\n  throw new Error(`\n    O SERVIDOR PYTHON NÃO ESTÁ RODANDO! \n    Por favor, abra um terminal na pasta do projeto e digite: python main.py --server\n  `);\n}\n\nreturn [{\n  json: {\n    ...cfg,\n    python_worker_url: worker_url,\n    host_detectado: worker_url\n  }\n}];"
+        "jsCode": "const cfg = $input.first().json;\n\nasync function tryPing(url) {\n  try {\n    await this.helpers.httpRequest({\n      method: 'GET',\n      url: `${url}/status`,\n      timeout: 2000\n    });\n    return true;\n  } catch (e) {\n    return false;\n  }\n}\n\n// 1. Tenta acessar via localhost (Funciona no Windows Local/Nativo)\nlet worker_url = 'http://127.0.0.1:8000';\nlet isAlive = await tryPing(worker_url);\n\n// 2. Se falhar, tenta host.docker.internal (Funciona quando n8n está no Docker)\nif (!isAlive) {\n  worker_url = 'http://host.docker.internal:8000';\n  isAlive = await tryPing(worker_url);\n}\n\n// 3. Se falhar, tenta o IP da rede local como último recurso\nif (!isAlive) {\n  worker_url = 'http://192.168.15.35:8000';\n  isAlive = await tryPing(worker_url);\n}\n\nif (!isAlive) {\n  worker_url = 'http://10.233.10.229:8000';\n  isAlive = await tryPing(worker_url);\n}\n\nif (!isAlive) {\n  throw new Error(`\n    O SERVIDOR PYTHON NÃO ESTÁ RODANDO! \n    Por favor, abra um terminal na pasta do projeto e digite: python main.py --server\n  `);\n}\n\nreturn [{\n  json: {\n    ...cfg,\n    python_worker_url: worker_url,\n    host_detectado: worker_url\n  }\n}];"
       },
       "id": "smart-host-1",
       "name": "Detectar Ambiente Automático",
@@ -80,28 +80,21 @@
     },
     {
       "parameters": {
-        "url": "={{$items('Detectar Ambiente Automático')[0].json.python_worker_url}}/download",
-        "options": {}
+        "url": "={{$items('Detectar Ambiente Automático')[0].json.python_worker_url}}/download-sql",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
       },
-      "id": "read-json-1",
-      "name": "Ler Resultado JSON",
+      "id": "download-sql-1",
+      "name": "Baixar SQL do Python",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         1232,
-        304
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const cfg = $items('Detectar Ambiente Automático')[0].json;\nconst payload = $input.first().json;\n\nconst records = payload.records || [];\nconst sqlLines = [];\n\nfunction escSql(s='') { return String(s || '').replace(/'/g, \"''\"); }\n\nfor (const r of records) {\n  const cnpj = r.cnpj_fundo;\n  if (!cnpj) continue;\n  \n  if (cfg.procedures.razaoSocial && r.razao_social_final) {\n    sqlLines.push(`${cfg.procedures.razaoSocial}('${cnpj}','${escSql(r.razao_social_normalizada || r.razao_social_final)}');`);\n  }\n  if (cfg.procedures.administrador && r.administrador_id && r.administrador_nome) {\n    sqlLines.push(`${cfg.procedures.administrador}('${cnpj}','${r.administrador_id}','${escSql(r.administrador_nome)}');`);\n  }\n  if (cfg.procedures.gestor && r.gestor_id && r.gestor_nome) {\n    sqlLines.push(`${cfg.procedures.gestor}('${cnpj}','${r.gestor_id}','${escSql(r.gestor_nome)}');`);\n  }\n  if (cfg.procedures.escriturador && r.escriturador_id && r.escriturador_nome) {\n    sqlLines.push(`${cfg.procedures.escriturador}('${cnpj}','${r.escriturador_id}','${escSql(r.escriturador_nome)}');`);\n  }\n  if (cfg.procedures.naturezaEconomica && r.natureza_economica_final) {\n    sqlLines.push(`${cfg.procedures.naturezaEconomica}('${cnpj}','${escSql(r.natureza_economica_final)}');`);\n  }\n  if (cfg.procedures.naturezaJuridica && r.natureza_juridica_final) {\n    sqlLines.push(`${cfg.procedures.naturezaJuridica}('${cnpj}','${escSql(r.natureza_juridica_final)}');`);\n  }\n  if (cfg.procedures.tipoFundo && r.tipo_fundo) {\n    sqlLines.push(`${cfg.procedures.tipoFundo}('${cnpj}','${escSql(r.tipo_fundo)}');`);\n  }\n  if (cfg.procedures.denominacaoSocialFundo && r.denominacao_social_fundo) {\n    sqlLines.push(`${cfg.procedures.denominacaoSocialFundo}('${cnpj}','${escSql(r.denominacao_social_fundo)}');`);\n  }\n  if (cfg.procedures.denominacaoSocialClasse && r.denominacao_social_classe) {\n    sqlLines.push(`${cfg.procedures.denominacaoSocialClasse}('${cnpj}','${escSql(r.denominacao_social_classe)}');`);\n  }\n}\n\nconst finalSql = sqlLines.join('\\n');\n\nreturn [{\n  json: { \n    status: 'SUCESSO',\n    total_registros: records.length,\n    total_querys: sqlLines.length\n  },\n  binary: {\n    data: {\n      data: Buffer.from(finalSql, 'utf-8').toString('base64'),\n      mimeType: 'application/sql',\n      fileName: cfg.sql_output_path\n    }\n  }\n}];"
-      },
-      "id": "generate-sql-1",
-      "name": "Gerar Consultas SQL",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1456,
         304
       ]
     },
@@ -115,7 +108,7 @@
       "type": "n8n-nodes-base.writeBinaryFile",
       "typeVersion": 1,
       "position": [
-        1680,
+        1456,
         304
       ]
     }
@@ -170,25 +163,14 @@
       "main": [
         [
           {
-            "node": "Ler Resultado JSON",
+            "node": "Baixar SQL do Python",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Ler Resultado JSON": {
-      "main": [
-        [
-          {
-            "node": "Gerar Consultas SQL",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Gerar Consultas SQL": {
+    "Baixar SQL do Python": {
       "main": [
         [
           {
@@ -206,7 +188,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "8e3b44e9-758c-4afe-896f-936d17804456",
+  "versionId": "45838804-95b5-4b8d-9d6c-bb0d57ea0da6",
   "meta": {
     "instanceId": "f09484b65aaddca6a11030b07fd13d81ab7e111f7b2b4395c59211c11ad2e2e8"
   },
