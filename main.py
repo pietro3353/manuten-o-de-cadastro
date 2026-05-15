@@ -5,15 +5,21 @@ import io
 import json
 import logging
 import os
+import shutil
 import time
 import zipfile
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import httpx
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+import data_validator as dv
+import diff_engine as de
+import pipeline_helpers as ph
 
 # Configurações de Log
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -29,6 +35,8 @@ MAX_RETRIES = 3
 
 # Estado Global do Servidor
 global_job_status = {"status": "idle", "message": "Aguardando", "progress": 0, "total": 0}
+global_execution_metrics = {}    # Métricas da última execução
+global_diff_report = {}          # Relatório de diff da última execução
 
 def normalize_text(value: str = "") -> str:
     import unicodedata
@@ -654,41 +662,59 @@ def consolidate_fund(f: Dict[str, Any], adm_data: Dict[str, Dict[str, str]] = No
     }
 
 async def execute_pipeline(req: dict):
-    global global_job_status
+    global global_job_status, global_execution_metrics, global_diff_report
     global_job_status = {"status": "running", "message": "Iniciando download do ZIP...", "progress": 0, "total": 0}
 
     concurrency = req.get("concurrency", DEFAULT_CONCURRENCY)
     output_path = req.get("output_path", "resultado_cvm.json")
     limit = req.get("limit", 0)
+    error_threshold = req.get("sql_error_threshold", 0.05)
 
     limits = httpx.Limits(max_keepalive_connections=concurrency, max_connections=concurrency * 2)
     timeout = httpx.Timeout(20.0)
 
+    timings = {"pipeline_start": datetime.now().isoformat()}
+    t_pipeline_start = time.perf_counter()
+
     try:
+        # === ETAPA 1: Download CVM ZIP ===
+        t0 = time.perf_counter()
         async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
             zip_bytes = await download_cvm_zip(client)
+            timings["download_cvm"] = {"duracao_s": round(time.perf_counter() - t0, 1), "status": "OK"}
+
+            # === ETAPA 2: Parse CSVs ===
+            t0 = time.perf_counter()
             global_job_status["message"] = "Processando CSVs em Memória..."
             funds = parse_cvm_csvs(zip_bytes)
+            timings["parse_csvs"] = {"duracao_s": round(time.perf_counter() - t0, 1), "registros": len(funds), "status": "OK"}
 
+            # === ETAPA 3: ANBIMA ===
             anbima_data = []
             anb_id = req.get("anbima_client_id")
             anb_secret = req.get("anbima_client_secret")
-
             if anb_id and anb_secret:
+                t0 = time.perf_counter()
                 global_job_status["message"] = "Buscando dados na ANBIMA..."
                 try:
                     token = await get_anbima_token(client, anb_id, anb_secret)
                     if token:
                         anbima_data = await fetch_anbima_lote(client, anb_id, token)
+                    timings["anbima"] = {"duracao_s": round(time.perf_counter() - t0, 1), "registros": len(anbima_data), "status": "OK"}
                 except Exception as e:
                     logger.error(f"Erro ANBIMA: {e}")
+                    timings["anbima"] = {"duracao_s": round(time.perf_counter() - t0, 1), "status": "ERRO", "erro": str(e)}
 
+            # === ETAPA 4: Administradores/Carteiras ===
+            t0 = time.perf_counter()
             global_job_status["message"] = "Baixando dados de Administradores (CVM)..."
             try:
                 adm_data = await download_and_parse_adm_cart(client)
+                timings["download_adm"] = {"duracao_s": round(time.perf_counter() - t0, 1), "participantes": len(adm_data), "status": "OK"}
             except Exception as e:
                 logger.error(f"Erro ao baixar cad_adm_cart.zip: {e}")
                 adm_data = {}
+                timings["download_adm"] = {"duracao_s": round(time.perf_counter() - t0, 1), "status": "ERRO", "erro": str(e)}
 
             anb_by_cnpj = {a["cnpj_fundo"]: a for a in anbima_data}
             for f in funds.values():
@@ -697,144 +723,95 @@ async def execute_pipeline(req: dict):
             to_process = list(funds.values())
             if limit > 0:
                 to_process = to_process[:limit]
-                
-            global_job_status["total"] = len(to_process)
-            global_job_status["message"] = "Consolidando dados finais instantaneamente..."
 
-        # Sem mais chamadas a APIs instáveis da CVM, apenas cruzamento de dados em memória
+            global_job_status["total"] = len(to_process)
+
+        # === ETAPA 5: Consolidação ===
+        t0 = time.perf_counter()
+        global_job_status["message"] = "Consolidando dados finais..."
         results = []
         for i, f in enumerate(to_process):
             results.append(consolidate_fund(f, adm_data))
             if i % 10000 == 0:
                 global_job_status["progress"] = i
+        timings["consolidacao"] = {"duracao_s": round(time.perf_counter() - t0, 1), "fundos": len(results), "status": "OK"}
 
+        # === ETAPA 6: Validação de dados ===
+        t0 = time.perf_counter()
+        global_job_status["message"] = "Validando dados..."
+        validations = ph.run_validation(results)
+        guardrails_info = {"filtro_cancelados": True, "natureza_juridica_desativada": True, "bloqueio_gestores_ambiguos": True}
+        quality_report = dv.generate_quality_report(results, validations, guardrails_info)
+        timings["validacao"] = {"duracao_s": round(time.perf_counter() - t0, 1), "rejeitados": quality_report.get("rejeitados_total", 0), "status": "OK"}
+        logger.info(f"Validação: {quality_report['validos_para_sql']}/{quality_report['total_processados']} válidos para SQL")
+
+        # === ETAPA 7: Diff com execução anterior ===
+        t0 = time.perf_counter()
+        global_job_status["message"] = "Comparando com execução anterior..."
+        diff_report = ph.run_diff(output_path, results)
+        timings["diff"] = {"duracao_s": round(time.perf_counter() - t0, 1), "status": "OK" if diff_report else "SKIP (sem anterior)"}
+        global_diff_report = diff_report or {}
+
+        # === ETAPA 8: Arquivar anterior e salvar novo JSON ===
+        t0 = time.perf_counter()
+        global_job_status["message"] = "Salvando resultados..."
+        archived = de.archive_previous(output_path)
+        if archived:
+            logger.info(f"Execução anterior arquivada em: {archived}")
+
+        json_output = {"status": "OK", "total": len(results), "data_quality_report": quality_report, "records": results}
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump({"status": "OK", "total": len(results), "records": results}, f, indent=2, ensure_ascii=False)
-            
-        # Gera e salva o arquivo SQL localmente, contornando qualquer problema de permissão do Docker/n8n
-        sql_lines = []
-        procedures = req.get("procedures", {
-            "razaoSocial": "CETIP.P_ATUALIZA_RAZAO_SOCIAL",
-            "administrador": "CETIP.P_ATUALIZA_ADMINISTRADOR",
-            "gestor": "CETIP.P_ATUALIZA_GESTOR",
-            "escriturador": "CETIP.P_ATUALIZA_ESCRITURADOR",
-            "custodiante": "CETIP.P_ATUALIZA_CUSTODIANTE",
-            "naturezaEconomica": "CETIP.P_ATUALIZA_NATUREZA_ECONOMICA",
-            "naturezaJuridica": "CETIP.P_ATUALIZA_NATUREZA_JURIDICA",
-            "diretorResponsavel": "CETIP.P_ATUALIZA_DIRETOR_RESPONSAVEL",
-            "dataConstituicao": "CETIP.P_ATUALIZA_DATA_CONSTITUICAO",
-            "dataRegistro": "CETIP.P_ATUALIZA_DATA_REGISTRO",
-            "dataSituacao": "CETIP.P_ATUALIZA_DATA_SITUACAO",
-            "codigoCVM": "CETIP.P_ATUALIZA_CODIGO_CVM",
-            "administradorEndereco": "CETIP.P_ATUALIZA_ADM_ENDERECO",
-            "administradorTelefones": "CETIP.P_ATUALIZA_ADM_TELEFONES",
-            "administradorEmail": "CETIP.P_ATUALIZA_ADM_EMAIL",
-            "gestorEndereco": "CETIP.P_ATUALIZA_GESTOR_ENDERECO",
-            "gestorTelefones": "CETIP.P_ATUALIZA_GESTOR_TELEFONES",
-            "gestorEmail": "CETIP.P_ATUALIZA_GESTOR_EMAIL",
-            "escrituradorEndereco": "CETIP.P_ATUALIZA_ESCRITURADOR_ENDERECO",
-            "escrituradorTelefones": "CETIP.P_ATUALIZA_ESCRITURADOR_TELEFONES",
-            "escrituradorEmail": "CETIP.P_ATUALIZA_ESCRITURADOR_EMAIL",
-            "custodianteEndereco": "CETIP.P_ATUALIZA_CUSTODIANTE_ENDERECO",
-            "custodianteTelefones": "CETIP.P_ATUALIZA_CUSTODIANTE_TELEFONES",
-            "custodianteEmail": "CETIP.P_ATUALIZA_CUSTODIANTE_EMAIL",
-            "tipoFundo": "CETIP.P_ATUALIZA_TIPO_FUNDO",
-            "denominacaoSocialFundo": "CETIP.P_ATUALIZA_DENOMINACAO_FUNDO",
-            "denominacaoSocialClasse": "CETIP.P_ATUALIZA_DENOMINACAO_CLASSE"
-        })
-        
-        def esc_sql(s):
-            return str(s or "").replace("'", "''")
+            json.dump(json_output, f, indent=2, ensure_ascii=False)
+        timings["geracao_json"] = {"duracao_s": round(time.perf_counter() - t0, 1), "tamanho_mb": round(os.path.getsize(output_path) / 1048576, 1), "status": "OK"}
 
-        _cancelados_ignorados = 0
-        _gestor_ambiguo = 0
+        # === ETAPA 9: Geração SQL Transacional ===
+        t0 = time.perf_counter()
+        global_job_status["message"] = "Gerando SQL transacional..."
+        procedures = req.get("procedures", ph.DEFAULT_PROCEDURES)
+        sql_text, sql_stats = ph.generate_transactional_sql(results, procedures, validations, error_threshold, label="COMPLETO")
 
-        for r in results:
-            cnpj = r.get("cnpj_fundo")
-            if not cnpj: continue
-
-            # TRAVA 1 - PERFORMANCE: Ignora fundos cancelados na geração SQL.
-            # O JSON de saída permanece completo para auditoria.
-            situacao = (r.get("situacao_final") or "").upper()
-            if "CANCELAD" in situacao:
-                _cancelados_ignorados += 1
-                continue
-            
-            if procedures.get("razaoSocial") and r.get("razao_social_final"):
-                rz = r.get("razao_social_normalizada") or r.get("razao_social_final")
-                sql_lines.append(f"{procedures['razaoSocial']}('{cnpj}','{esc_sql(rz)}');")
-            if procedures.get("administrador") and r.get("administrador_id") and r.get("administrador_nome"):
-                sql_lines.append(f"{procedures['administrador']}('{cnpj}','{r.get('administrador_id')}','{esc_sql(r.get('administrador_nome'))}');")
-            # TRAVA 3 - SEGURANÇA DE DADOS: Só atualiza gestor se não houver ambiguidade (gestor único).
-            # Fundos com múltiplos gestores na CVM são ignorados para evitar corrupção.
-            if not r.get("multiplos_gestores"):
-                if procedures.get("gestor") and r.get("gestor_id") and r.get("gestor_nome"):
-                    sql_lines.append(f"{procedures['gestor']}('{cnpj}','{r.get('gestor_id')}','{esc_sql(r.get('gestor_nome'))}');")
-            else:
-                _gestor_ambiguo += 1
-            if procedures.get("escriturador") and r.get("escriturador_id") and r.get("escriturador_nome"):
-                sql_lines.append(f"{procedures['escriturador']}('{cnpj}','{r.get('escriturador_id')}','{esc_sql(r.get('escriturador_nome'))}');")
-            if procedures.get("custodiante") and r.get("custodiante_id") and r.get("custodiante_nome"):
-                sql_lines.append(f"{procedures['custodiante']}('{cnpj}','{r.get('custodiante_id')}','{esc_sql(r.get('custodiante_nome'))}');")
-            if procedures.get("naturezaEconomica") and r.get("natureza_economica_final"):
-                sql_lines.append(f"{procedures['naturezaEconomica']}('{cnpj}','{esc_sql(r.get('natureza_economica_final'))}');")
-            # TRAVA 2 - REGRA DE NEGÓCIO: Geração de Natureza Jurídica PERMANENTEMENTE DESATIVADA.
-            # A área de negócios proibiu a alteração automatizada do status Aberto/Fechado.
-            # if procedures.get("naturezaJuridica") and r.get("natureza_juridica_final"):
-            #     sql_lines.append(f"{procedures['naturezaJuridica']}('{cnpj}','{esc_sql(r.get('natureza_juridica_final'))}');")
-                
-            # Novos campos
-            if procedures.get("diretorResponsavel") and r.get("diretor_responsavel"):
-                sql_lines.append(f"{procedures['diretorResponsavel']}('{cnpj}','{esc_sql(r.get('diretor_responsavel'))}');")
-            if procedures.get("dataConstituicao") and r.get("data_constituicao"):
-                sql_lines.append(f"{procedures['dataConstituicao']}('{cnpj}',TO_DATE('{r.get('data_constituicao')}','YYYY-MM-DD'));")
-            if procedures.get("dataRegistro") and r.get("data_registro"):
-                sql_lines.append(f"{procedures['dataRegistro']}('{cnpj}',TO_DATE('{r.get('data_registro')}','YYYY-MM-DD'));")
-            if procedures.get("dataSituacao") and r.get("data_situacao"):
-                sql_lines.append(f"{procedures['dataSituacao']}('{cnpj}',TO_DATE('{r.get('data_situacao')}','YYYY-MM-DD'));")
-            if procedures.get("codigoCVM") and r.get("codigo_cvm"):
-                sql_lines.append(f"{procedures['codigoCVM']}('{cnpj}','{esc_sql(r.get('codigo_cvm'))}');")
-            if procedures.get("administradorEndereco") and r.get("administrador_endereco"):
-                sql_lines.append(f"{procedures['administradorEndereco']}('{cnpj}','{esc_sql(r.get('administrador_endereco'))}');")
-            if procedures.get("administradorTelefones") and r.get("administrador_telefones"):
-                sql_lines.append(f"{procedures['administradorTelefones']}('{cnpj}','{esc_sql(r.get('administrador_telefones'))}');")
-            if procedures.get("administradorEmail") and r.get("administrador_email"):
-                sql_lines.append(f"{procedures['administradorEmail']}('{cnpj}','{esc_sql(r.get('administrador_email'))}');")
-            # TRAVA 3 - SEGURANÇA: Contatos do gestor protegidos pela mesma trava de ambiguidade.
-            if not r.get("multiplos_gestores"):
-                if procedures.get("gestorEndereco") and r.get("gestor_endereco"):
-                    sql_lines.append(f"{procedures['gestorEndereco']}('{cnpj}','{esc_sql(r.get('gestor_endereco'))}');")
-                if procedures.get("gestorTelefones") and r.get("gestor_telefones"):
-                    sql_lines.append(f"{procedures['gestorTelefones']}('{cnpj}','{esc_sql(r.get('gestor_telefones'))}');")
-                if procedures.get("gestorEmail") and r.get("gestor_email"):
-                    sql_lines.append(f"{procedures['gestorEmail']}('{cnpj}','{esc_sql(r.get('gestor_email'))}');")
-            if procedures.get("escrituradorEndereco") and r.get("escriturador_endereco"):
-                sql_lines.append(f"{procedures['escrituradorEndereco']}('{cnpj}','{esc_sql(r.get('escriturador_endereco'))}');")
-            if procedures.get("escrituradorTelefones") and r.get("escriturador_telefones"):
-                sql_lines.append(f"{procedures['escrituradorTelefones']}('{cnpj}','{esc_sql(r.get('escriturador_telefones'))}');")
-            if procedures.get("escrituradorEmail") and r.get("escriturador_email"):
-                sql_lines.append(f"{procedures['escrituradorEmail']}('{cnpj}','{esc_sql(r.get('escriturador_email'))}');")
-            if procedures.get("custodianteEndereco") and r.get("custodiante_endereco"):
-                sql_lines.append(f"{procedures['custodianteEndereco']}('{cnpj}','{esc_sql(r.get('custodiante_endereco'))}');")
-            if procedures.get("custodianteTelefones") and r.get("custodiante_telefones"):
-                sql_lines.append(f"{procedures['custodianteTelefones']}('{cnpj}','{esc_sql(r.get('custodiante_telefones'))}');")
-            if procedures.get("custodianteEmail") and r.get("custodiante_email"):
-                sql_lines.append(f"{procedures['custodianteEmail']}('{cnpj}','{esc_sql(r.get('custodiante_email'))}');")
-            if procedures.get("tipoFundo") and r.get("tipo_fundo"):
-                sql_lines.append(f"{procedures['tipoFundo']}('{cnpj}','{esc_sql(r.get('tipo_fundo'))}');")
-            if procedures.get("denominacaoSocialFundo") and r.get("denominacao_social_fundo"):
-                sql_lines.append(f"{procedures['denominacaoSocialFundo']}('{cnpj}','{esc_sql(r.get('denominacao_social_fundo'))}');")
-            if procedures.get("denominacaoSocialClasse") and r.get("denominacao_social_classe"):
-                sql_lines.append(f"{procedures['denominacaoSocialClasse']}('{cnpj}','{esc_sql(r.get('denominacao_social_classe'))}');")
-                
-        # Usa apenas o nome do arquivo para garantir que seja salvo na pasta do script Python (Windows), ignorando caminhos do Linux
         sql_filename = os.path.basename(req.get("sql_output_path", "update_fundos.sql"))
         with open(sql_filename, "w", encoding="utf-8") as f:
-            f.write("\n".join(sql_lines))
+            f.write(sql_text)
+        timings["geracao_sql"] = {"duracao_s": round(time.perf_counter() - t0, 1), "linhas": sql_stats["total_linhas_sql"], "tamanho_mb": round(os.path.getsize(sql_filename) / 1048576, 1), "status": "OK"}
 
-        logger.info(f"SQL gerado: {len(sql_lines)} linhas | Cancelados ignorados: {_cancelados_ignorados} | Gestores ambíguos bloqueados: {_gestor_ambiguo}")
-        global_job_status = {"status": "done", "message": "Processo concluído!", "progress": len(to_process), "total": len(to_process), "sql_lines": len(sql_lines), "cancelados_ignorados": _cancelados_ignorados, "gestores_ambiguos": _gestor_ambiguo}
-        logger.info("Processo concluído com sucesso!")
+        logger.info(f"SQL transacional gerado: {sql_stats['total_linhas_sql']} linhas | "
+                     f"Cancelados: {sql_stats['cancelados_ignorados']} | "
+                     f"Gestores ambíguos: {sql_stats['gestores_ambiguos']} | "
+                     f"Rejeitados validação: {sql_stats['rejeitados_validacao']}")
+
+        # === ETAPA 9b: SQL Delta (apenas fundos novos/alterados) ===
+        delta_sql_stats = None
+        if diff_report:
+            delta_sql_text, delta_sql_stats = ph.generate_delta_sql(results, procedures, validations, diff_report, error_threshold)
+            if delta_sql_text:
+                delta_filename = sql_filename.replace(".sql", "_DELTA.sql")
+                with open(delta_filename, "w", encoding="utf-8") as f:
+                    f.write(delta_sql_text)
+                logger.info(f"SQL DELTA gerado: {delta_sql_stats['total_linhas_sql']} linhas | "
+                             f"{delta_sql_stats.get('delta_cnpjs_novos', 0)} novos + "
+                             f"{delta_sql_stats.get('delta_cnpjs_alterados', 0)} alterados")
+
+        # === ETAPA 10: Métricas ===
+        timings["total_seconds"] = round(time.perf_counter() - t_pipeline_start, 1)
+        metrics = ph.build_execution_metrics(timings, sql_stats, quality_report, diff_report, results)
+        output_dir = os.path.dirname(output_path) or "."
+        ph.save_metrics(metrics, output_dir)
+        global_execution_metrics = metrics
+
+        global_job_status = {
+            "status": "done",
+            "message": "Processo concluído!",
+            "progress": len(to_process),
+            "total": len(to_process),
+            "sql_lines": sql_stats["total_linhas_sql"],
+            "cancelados_ignorados": sql_stats["cancelados_ignorados"],
+            "gestores_ambiguos": sql_stats["gestores_ambiguos"],
+            "rejeitados_validacao": sql_stats["rejeitados_validacao"],
+            "duration_seconds": timings["total_seconds"],
+            "has_diff": diff_report is not None,
+        }
+        logger.info(f"Pipeline concluído em {timings['total_seconds']}s")
     except Exception as e:
         logger.error(f"Erro durante execução: {e}")
         global_job_status = {"status": "error", "message": str(e), "progress": 0, "total": 0}
@@ -877,6 +854,35 @@ class SimpleWorkerHandler(BaseHTTPRequestHandler):
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": "Arquivo SQL não encontrado. Execute o pipeline primeiro."}).encode('utf-8'))
+        elif self.path == "/metrics":
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(global_execution_metrics, ensure_ascii=False).encode('utf-8'))
+        elif self.path == "/diff":
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(global_diff_report, ensure_ascii=False).encode('utf-8'))
+        elif self.path == "/diff-summary":
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            if global_diff_report:
+                self.wfile.write(de.generate_summary_text(global_diff_report).encode('utf-8'))
+            else:
+                self.wfile.write("Nenhum diff disponível. Execute o pipeline primeiro.".encode('utf-8'))
+        elif self.path == "/health":
+            health = {
+                "status": "UP",
+                "pipeline_status": global_job_status.get("status", "idle"),
+                "last_execution": global_execution_metrics.get("finished_at"),
+                "last_duration_s": global_execution_metrics.get("duration_total_seconds"),
+            }
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(health).encode('utf-8'))
         elif self.path == "/stop":
             self.send_response(200)
             self.send_header('Content-type', 'application/json')

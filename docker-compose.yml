@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  b3-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: b3-fundos-worker
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
