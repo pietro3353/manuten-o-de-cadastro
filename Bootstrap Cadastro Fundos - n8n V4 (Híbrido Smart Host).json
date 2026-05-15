@@ -1,5 +1,5 @@
 {
-  "name": "Bootstrap Cadastro Fundos - n8n V5 (Produção - SQL via Python)",
+  "name": "Bootstrap Cadastro Fundos - n8n V6 (Produção - Cron + Alertas)",
   "nodes": [
     {
       "parameters": {},
@@ -111,6 +111,51 @@
         1456,
         304
       ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger-1",
+      "name": "Cron 6h (Seg-Sex)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        112,
+        512
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "error-trigger-1",
+      "name": "Erro no Pipeline",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        560,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "subject": "=🚨 FALHA Pipeline B3 — {{ $now.format('dd/MM/yyyy HH:mm') }}",
+        "options": {}
+      },
+      "id": "email-alert-1",
+      "name": "Alerta por Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        784,
+        640
+      ],
+      "webhookId": "a60a033b-11b9-4b89-8dd4-3a3977a7152c"
     }
   ],
   "pinData": {},
@@ -120,6 +165,28 @@
         [
           {
             "node": "Configurações Globais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron 6h (Seg-Sex)": {
+      "main": [
+        [
+          {
+            "node": "Configurações Globais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Erro no Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Alerta por Email",
             "type": "main",
             "index": 0
           }
@@ -188,7 +255,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "45838804-95b5-4b8d-9d6c-bb0d57ea0da6",
+  "versionId": "0faf0338-3af6-431c-86dd-d0d45a4d6372",
   "meta": {
     "instanceId": "f09484b65aaddca6a11030b07fd13d81ab7e111f7b2b4395c59211c11ad2e2e8"
   },
